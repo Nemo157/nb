@@ -359,8 +359,12 @@
 
 #![cfg_attr(feature = "unstable", feature(never_type))]
 
-#[cfg(feature = "unstable")]
-pub mod io;
+macro_rules! if_unstable {
+    ($($i:item)*) => ($(
+        #[cfg(feature = "unstable")]
+        $i
+    )*)
+}
 
 use core::fmt;
 
@@ -408,45 +412,6 @@ impl<E> From<E> for Error<E> {
     }
 }
 
-/// Await operation (*won't work until the language gains support for
-/// generators*)
-///
-/// This macro evaluates the expression `$e` *cooperatively* yielding control
-/// back to the (generator) caller whenever `$e` evaluates to
-/// `Error::WouldBlock`.
-///
-/// # Requirements
-///
-/// This macro must be called within a generator body.
-///
-/// # Input
-///
-/// An expression `$e` that evaluates to `nb::Result<T, E>`
-///
-/// # Output
-///
-/// - `Ok(t)` if `$e` evaluates to `Ok(t)`
-/// - `Err(e)` if `$e` evaluates to `Err(nb::Error::Other(e))`
-#[cfg(feature = "unstable")]
-#[macro_export]
-macro_rules! await {
-    ($e:expr) => {
-        loop {
-            #[allow(unreachable_patterns)]
-            match $e {
-                Err($crate::Error::Other(e)) => {
-                    #[allow(unreachable_code)]
-                    break Err(e)
-                },
-                Err($crate::Error::WouldBlock) => {}, // yield (see below)
-                Ok(x) => break Ok(x),
-            }
-
-            yield
-        }
-    }
-}
-
 /// Turns the non-blocking expression `$e` into a blocking operation.
 ///
 /// This is accomplished by continuously calling the expression `$e` until it no
@@ -477,41 +442,83 @@ macro_rules! block {
     }
 }
 
-/// Future adapter
-///
-/// This is a *try* operation from a `nb::Result` to a `futures::Poll`
-///
-/// # Requirements
-///
-/// This macro must be called within a function / closure that has signature
-/// `fn(..) -> futures::Poll<T, E>`.
-///
-/// This macro requires that the [`futures`] crate is in the root of the crate.
-///
-/// [`futures`]: https://crates.io/crates/futures
-///
-/// # Input
-///
-/// An expression `$e` that evaluates to `nb::Result<T, E>`
-///
-/// # Early return
-///
-/// - `Ok(Async::NotReady)` if `$e` evaluates to `Err(nb::Error::WouldBlock)`
-/// - `Err(e)` if `$e` evaluates to `Err(nb::Error::Other(e))`
-///
-/// # Output
-///
-/// `t` if `$e` evaluates to `Ok(t)`
-#[cfg(feature = "unstable")]
-#[macro_export]
-macro_rules! try_nb {
-    ($e:expr) => {
-        match $e {
-            Err($crate::Error::Other(e)) => return Err(e),
-            Err($crate::Error::WouldBlock) => {
-                return Ok(::futures::Async::NotReady)
-            },
-            Ok(x) => x,
+if_unstable! {
+    extern crate futures_core as futures;
+    extern crate futures_io;
+
+    /// Future adapter
+    ///
+    /// This is a *try* operation from a `nb::Result` to a `futures::Poll`
+    ///
+    /// # Requirements
+    ///
+    /// This macro must be called within a function / closure that has signature
+    /// `fn(..) -> futures::Poll<T, E>`.
+    ///
+    /// This macro requires that the [`futures`] crate is in the root of the crate.
+    ///
+    /// [`futures`]: https://crates.io/crates/futures
+    ///
+    /// # Input
+    ///
+    /// An expression `$e` that evaluates to `nb::Result<T, E>`
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(Async::Ready(t))` if `$e` evaluates to `Ok(t)`
+    /// - `Ok(Async::Pending)` if `$e` evaluates to `Err(nb::Error::WouldBlock)`
+    /// - `Err(e)` if `$e` evaluates to `Err(nb::Error::Other(e))`
+    #[macro_export]
+    macro_rules! try_nb {
+        ($e:expr) => {
+            match $e {
+                Err($crate::Error::Other(e)) =>
+                    Err(::core::convert::Into::into(e)),
+                Err($crate::Error::WouldBlock) =>
+                    Ok(::futures::Async::Pending),
+                Ok(x) =>
+                    Ok(::futures::Async::Ready(x)),
+            }
         }
     }
+
+    /// Await operation (*won't work until the language gains support for
+    /// generators*)
+    ///
+    /// This macro evaluates the expression `$e` *cooperatively* yielding control
+    /// back to the (generator) caller whenever `$e` evaluates to
+    /// `Error::WouldBlock`.
+    ///
+    /// # Requirements
+    ///
+    /// This macro must be called within a generator body.
+    ///
+    /// # Input
+    ///
+    /// An expression `$e` that evaluates to `nb::Result<T, E>`
+    ///
+    /// # Output
+    ///
+    /// - `Ok(t)` if `$e` evaluates to `Ok(t)`
+    /// - `Err(e)` if `$e` evaluates to `Err(nb::Error::Other(e))`
+    #[macro_export]
+    macro_rules! await {
+        ($e:expr) => {
+            loop {
+                #[allow(unreachable_patterns)]
+                match $e {
+                    Err($crate::Error::Other(e)) => {
+                        #[allow(unreachable_code)]
+                        break Err(::core::convert::Into::into(e))
+                    },
+                    Err($crate::Error::WouldBlock) => {}, // yield (see below)
+                    Ok(x) => break Ok(x),
+                }
+
+                yield
+            }
+        }
+    }
+
+    pub mod io;
 }

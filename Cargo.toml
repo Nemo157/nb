@@ -9,7 +9,21 @@ repository = "https://github.com/japaric/nb"
 version = "0.1.1"
 
 [features]
-unstable = []
+unstable = ["futures-core", "futures-io"]
 
-[dev-dependencies]
-futures = "0.1.17"
+[dependencies.futures-core]
+git = "https://github.com/Nemo157/futures-rs"
+branch = "core-io"
+optional = true
+default-features = false
+
+[dependencies.futures-io]
+git = "https://github.com/Nemo157/futures-rs"
+branch = "core-io"
+optional = true
+default-features = false
+
+[dev-dependencies.futures]
+git = "https://github.com/Nemo157/futures-rs"
+branch = "core-io"
+default-features = false
